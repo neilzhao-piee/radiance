@@ -4,6 +4,11 @@
 # providers keep working unchanged after the cutover.
 #
 #   RADIANCE_API_KEY=x radiance --config /etc/radiance/radiance.yaml --check
+#
+# This file is the deployed config and is committed to the fork (neilzhao-piee/radiance,
+# deploy/compose/tp2.single.radiance.yaml). Edit on .141, then commit back -- the
+# container runs exactly what is on disk here. Backup of the 2026-11-25 state:
+# tp2.single.radiance.yaml.bak-20261126 (same directory).
 server:
   host: "::"
   port: 8080
@@ -17,24 +22,35 @@ models:
   # Experts that do not fit the cards sit in a pinned host pool of 16 GiB (8 per rank).
   # Entry name = old Strata model id for client compatibility.
   #
-  # max-num-seqs 2 / max-model-len 65536: measured on this rig (2026-11-24).
-  #   The dual-sequence KV pool is 1.14 GiB, which covers 2 sequences at 65536 in
-  #   full -- nothing spills to host memory. Throughput keeps rising with context
-  #   and plateaus around 48k-64k: single-stream prefill 5.4-5.7k t/s, decode
-  #   190 -> 213 t/s (1k -> 48k), dual-seq aggregate 260-305 t/s. At 131072 the
-  #   pool needs about 4.6 GiB and decode falls to ~166 t/s, so 64k is the sweet
-  #   spot. Longer requests are refused with HTTP 400, which keeps the KV cache
-  #   fully covered instead of letting it spill into host memory.
+  # 1 sequence at 262144 -- user decision 2026-11-26 (values were set 2026-11-25).
+  #   The box serves one deep conversation at a time (DSH sessions with 150k-163k
+  #   prompts run live; warm prefix cache keeps their TTFT under 1 s). The cost is
+  #   that concurrent requests queue behind each other: in practice ~1% waited
+  #   over 10 s. Acceptable while .141 is the deep-context box.
+  #   Earlier layout, kept as the known-good alternative if LibreChat-style
+  #   concurrency ever leads: 2 sequences at 65536. Measured 2026-11-24 on this rig
+  #   (bench/ctx/conc logs in ~/radiance/): that KV pool (1.14 GiB) covers both
+  #   sequences fully, single-stream prefill 5.4-5.7k t/s, decode 190 -> 213 t/s
+  #   (1k -> 48k), dual-seq aggregate 260-305 t/s. At 131072 the pool needs about
+  #   4.6 GiB and dual-seq decode falls to ~166 t/s -- so if concurrency returns,
+  #   go back to 2/65536 (longer requests refused with HTTP 400, KV stays covered).
+  #   Live single-stream at 150k+ with warm cache: decode 164-207 t/s.
+  # prefix-cache-mib 4096 (2026-11-26): 1024 held only 71,200 tokens in the host
+  #   tier; 150k+ sessions filled it every turn and the log kept reporting
+  #   "kv tiers: ... got no host copy" / "prefix cache: ... erased with no copy
+  #   off the card" (417k evictions counted in two days). 4096 MiB holds ~285k
+  #   tokens. The host pins only the 16 GiB expert pool plus ~2 GiB KV per card
+  #   and has ~48 GiB free, so the larger tier is nearly free.
   #   Host tuning: CPU governor must be performance (systemd unit cpu-perf.service).
   qwen3.8-flash-next-unsloth-ud-q4_k_xl:
     model: /models/qwen3.8-next-flash-iqr-v4.rad
     tp: 2
     tp-wire: wht6
-    max-num-seqs: 2
-    max-model-len: 65536
+    max-num-seqs: 1
+    max-model-len: 262144
     placement: expert_tiered
     host-pool-mib: 16384
     kv-cache-dtype: i8
-    prefix-cache-mib: 1024
+    prefix-cache-mib: 4096
     num-speculative-tokens: 3
     max-num-batched-tokens: 2048
