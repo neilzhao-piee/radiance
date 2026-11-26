@@ -43,7 +43,7 @@ models:
   #   and has ~48 GiB free, so the larger tier is nearly free.
   #   Host tuning: CPU governor must be performance (systemd unit cpu-perf.service).
   qwen3.8-flash-next-unsloth-ud-q4_k_xl:
-    model: /models/qwen3.8-next-flash-iqr-v4.rad
+    model: /models/qwen3.8-next-flash-uncensored-iqr-v4.rad  # 2026-11-26 换 uncensored 版（与原版只差 6 组残差流权重，用户 14:07 拍板）
     tp: 2
     tp-wire: wht6
     max-num-seqs: 1
